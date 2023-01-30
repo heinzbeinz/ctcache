@@ -816,9 +816,8 @@ def ctc_image_age_histogram():
 def ctc_static_file(file_name):
     try:
         return flask.send_from_directory(
-            directory=ctcache_app.config["STATIC_FOLDER"],
-            path=file_name,
-            filename=file_name,
+            ctcache_app.config["STATIC_FOLDER"],
+            file_name,
             as_attachment=False
         )
     except FileNotFoundError:
