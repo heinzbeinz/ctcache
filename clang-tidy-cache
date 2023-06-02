@@ -30,7 +30,7 @@ class ClangTidyCacheOpts(object):
         self._strip_list = os.getenv("CTCACHE_STRIP", "").split(':')
 
         # splits arguments starting with - on the first =
-        args = [arg.split('=', 1) if arg.startswith('-') else [arg] for arg in args]
+        args = [arg.split('=', 1) if arg.startswith('-p') else [arg] for arg in args]
         args = [arg for sub in args for arg in sub]
 
         if args.count("--") == 1:
@@ -179,6 +179,10 @@ class ClangTidyCacheOpts(object):
         return os.getenv("CTCACHE_S3_FOLDER", 'clang-tidy-cache')
 
     # --------------------------------------------------------------------------
+    def s3_no_credentials(self):
+        return os.getenv("CTCACHE_S3_NO_CREDENTIALS", "")
+
+    # --------------------------------------------------------------------------
     def has_host(self):
         return os.getenv("CTCACHE_HOST") is not None
 
@@ -189,6 +193,10 @@ class ClangTidyCacheOpts(object):
     # --------------------------------------------------------------------------
     def rest_port(self):
         return int(os.getenv("CTCACHE_PORT", 5000))
+
+    # --------------------------------------------------------------------------
+    def ignore_output(self):
+        return "CTCACHE_IGNORE_OUTPUT" in os.environ
 
     # --------------------------------------------------------------------------
     def debug_enabled(self):
@@ -339,10 +347,16 @@ class ClangTidyS3Cache(object):
     def __init__(self, log, opts):
         from boto3 import client
         from botocore.exceptions import ClientError
+        from botocore.config import Config
+        from botocore.session import UNSIGNED
+
         self._ClientError = ClientError
         self._log = log
         self._opts = opts
-        self._client = client('s3')
+        if self._opts.s3_no_credentials():
+            self._client = client("s3", config=Config(signature_version=UNSIGNED))
+        else:
+            self._client = client("s3")
         self._bucket = opts.s3_bucket()
         self._bucket_folder = opts.s3_bucket_folder()
 
@@ -363,6 +377,8 @@ class ClangTidyS3Cache(object):
 
     # --------------------------------------------------------------------------
     def store_in_cache(self, digest):
+        if self._opts.s3_no_credentials():
+            return
         try:
             path = self._make_path(digest)
             self._client.put_object(Bucket=self._bucket, Key=path, Body=digest)
@@ -576,7 +592,10 @@ def run_clang_tidy_cached(log, opts):
     sys.stderr.write(stderr.decode("utf8"))
 
     tidy_success = True
-    if proc.returncode != 0 or stdout:
+    if proc.returncode != 0:
+        tidy_success = False
+
+    if stdout and not opts.ignore_output():
         tidy_success = False
 
     if tidy_success and digest:
